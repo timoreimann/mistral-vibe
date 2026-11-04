@@ -76,6 +76,7 @@ from vibe.core.config.schema import (
 )
 from vibe.core.config.shell_timeouts import check_shell_timeout_pair
 from vibe.core.paths import GLOBAL_ENV_FILE
+from vibe.core.power import SleepPreventionMode
 from vibe.core.prompts import (
     SystemPrompt,
     UtilityPrompt,
@@ -1024,6 +1025,18 @@ class VibeConfigSchema(ConfigSchema):
     enable_update_checks: Annotated[bool, WithReplaceMerge()] = True
     enable_auto_update: Annotated[bool, WithReplaceMerge()] = True
     enable_notifications: Annotated[bool, WithReplaceMerge()] = True
+    power_sleep_prevention: Annotated[SleepPreventionMode, WithReplaceMerge()] = Field(
+        default=SleepPreventionMode.IDLE,
+        description=(
+            "Prevent the system from sleeping while an agent turn is running; an idle"
+            " session, including one waiting on background jobs, does not hold it."
+            " Levels are cumulative: 'idle' keeps the system awake (macOS"
+            " `caffeinate -i`), 'display' also keeps the display on (`-i -d`),"
+            " 'system' also blocks all system sleep on AC and declares the user"
+            " active (`-i -d -s -u`), and 'off' disables sleep prevention."
+            " macOS only; other platforms are a no-op."
+        ),
+    )
     experimental_enable_tab_status: Annotated[bool, WithReplaceMerge()] = True
     enable_system_trust_store: Annotated[bool, WithReplaceMerge()] = False
     api_timeout: Annotated[float, WithReplaceMerge()] = DEFAULT_API_TIMEOUT

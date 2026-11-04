@@ -215,6 +215,7 @@ from vibe.app_server._plugins import (
     plugin_hook_signature,
     plugin_reload_notices,
 )
+from vibe.app_server._power_service import SleepPreventionService
 from vibe.app_server._projection import (
     project_agent_summary,
     project_config_view,
@@ -719,6 +720,7 @@ from vibe.core.model_catalog import (
     fetch_and_cache_model_catalog,
     model_catalog_wait_needed,
 )
+from vibe.core.power import SleepPreventionMode
 from vibe.core.proxy_setup import (
     SUPPORTED_PROXY_VARS,
     ProxySetupError,
@@ -1152,6 +1154,11 @@ class UnifiedSessionContext:
     # What the build did with the org config, for the first session that runs
     # under this context to publish. Frozen field, mutable slot.
     org_config_report: OrgConfigReportSlot = field(default_factory=OrgConfigReportSlot)
+    # Process-wide sleep prevention (ADR 0019): the runtime hands every session
+    # the one its process built, so concurrent turns share a single assertion.
+    sleep_prevention: SleepPreventionService = field(
+        default_factory=SleepPreventionService
+    )
 
 
 class SessionContextBuilder(Protocol):
@@ -6274,6 +6281,10 @@ class UnifiedHarnessBackendAdapter(  # noqa: PLR0904 - implements app-server ses
         self._queue_items_sent_by_sessions: set[str] = set()
         # TurnStarted repeats while a turn runs; who started it is decided once.
         self._turn_decided_who_started: str | None = None
+        # Turns this session is holding the process-wide power assertion for,
+        # by turn id, with the mode each asked for; released on TurnCompleted
+        # or at shutdown.
+        self._power_held_turns: dict[str, SleepPreventionMode] = {}
         self._worktree_progress: WorktreeProgress | None = None
         self._setup_abandoned = False
         self._relocation_active = False
@@ -11169,6 +11180,7 @@ class UnifiedHarnessBackendAdapter(  # noqa: PLR0904 - implements app-server ses
         if self._closed:
             return
         self._closed = True
+        self._release_turn_power()
         self._close_org_config()
         self._unfollow_connector_catalog()
         if self._vibe_code is not None:
@@ -11863,6 +11875,7 @@ class UnifiedHarnessBackendAdapter(  # noqa: PLR0904 - implements app-server ses
                 self._translated_state = previous
                 for backend_event in translated:
                     self._note_who_started_the_turn(backend_event.event)
+                    self._track_turn_power(backend_event.event)
                     yield backend_event
                     await self._bump_promoted_queued_turn(backend_event.event)
                 await self._mark_harness_event_observed(watermark)
@@ -11943,6 +11956,31 @@ class UnifiedHarnessBackendAdapter(  # noqa: PLR0904 - implements app-server ses
                 task.cancel()
                 with contextlib.suppress(asyncio.CancelledError, Exception):
                     await task
+
+    def _track_turn_power(self, app_event: AppServerEvent) -> None:
+        """Hold the process-wide sleep-prevention assertion while a turn runs.
+
+        TurnStarted acquires it with the session's current
+        ``power_sleep_prevention`` mode; TurnCompleted (also emitted for
+        failed and interrupted turns) releases it. An idle session holds
+        nothing, matching oh-my-pi's ``power.sleepPrevention``.
+        """
+        if isinstance(app_event, TurnStarted):
+            turn_id = app_event.turn.id
+            if turn_id in self._power_held_turns:
+                return
+            mode = self._context.config_orchestrator.config.power_sleep_prevention
+            self._power_held_turns[turn_id] = mode
+            self._context.sleep_prevention.turn_started(mode)
+        elif isinstance(app_event, TurnCompleted):
+            mode = self._power_held_turns.pop(app_event.turn.id, None)
+            if mode is not None:
+                self._context.sleep_prevention.turn_finished(mode)
+
+    def _release_turn_power(self) -> None:
+        held, self._power_held_turns = self._power_held_turns, {}
+        for mode in held.values():
+            self._context.sleep_prevention.turn_finished(mode)
 
     def _note_who_started_the_turn(self, app_event: AppServerEvent) -> None:
         """A turn another session's message starts holds back the session's own

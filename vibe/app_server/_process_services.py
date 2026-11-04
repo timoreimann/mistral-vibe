@@ -13,6 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from vibe.app_server._org_config_service import OrgConfigService
+from vibe.app_server._power_service import SleepPreventionService
 from vibe.app_server.connector_catalog import SharedConnectorCatalog
 from vibe.setup.auth._oidc_tenant import OidcTenantResolver
 
@@ -23,6 +24,7 @@ class ProcessServices:
     connector_catalog: SharedConnectorCatalog
     # The OIDC tenant per signed-in user, shared by CLI and Desktop connections.
     oidc_tenants: OidcTenantResolver
+    sleep_prevention: SleepPreventionService
 
     @classmethod
     def create(cls) -> ProcessServices:
@@ -31,9 +33,11 @@ class ProcessServices:
             org_config=OrgConfigService(),
             connector_catalog=SharedConnectorCatalog(),
             oidc_tenants=OidcTenantResolver(),
+            sleep_prevention=SleepPreventionService(),
         )
 
     async def close(self) -> None:
+        self.sleep_prevention.close()
         await self.org_config.close()
         await self.connector_catalog.close()
 

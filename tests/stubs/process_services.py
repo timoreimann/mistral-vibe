@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from vibe.app_server._org_config_service import OrgConfigService
+from vibe.app_server._power_service import SleepPreventionService
 from vibe.app_server._process_services import ProcessServices
 from vibe.app_server.connector_catalog import SharedConnectorCatalog
 from vibe.core.config.admin_config import ManagedConfig, ManagedConfigResult
@@ -73,6 +74,7 @@ def fake_process_services(
         org_config=OrgConfigService(fetch=server.fetch, **org_config),
         connector_catalog=connector_catalog or SharedConnectorCatalog(),
         oidc_tenants=OidcTenantResolver(),
+        sleep_prevention=SleepPreventionService(),
     )
 
 

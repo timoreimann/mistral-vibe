@@ -1981,6 +1981,7 @@ class HarnessProcess:
             harness_files=harness_files,
             agents=agents,
             org_config_service=self.services.org_config,
+            sleep_prevention=self.services.sleep_prevention,
             org_config_key=OrgConfigKeySlot(session_config.org_config_key),
             derive=derive,
             permissions=permission_resolver,
